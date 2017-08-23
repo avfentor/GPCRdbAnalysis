@@ -16,49 +16,40 @@ import matplotlib.pyplot as plt
 requests_cache.install_cache('gpcrdb_cache')
 
 
-def _parse_display_generic_number(x):
-    """
-    Parse "display_generic_number".
-
-    GPCRdb numbering looks like "1.26x26". This function splits each component out of a list
-    of such numbers and returns a DataFrame.
-    """
-    parsed = pd.Series(x).str.split('[.x]', expand=True)
-    parsed.columns = ['seqment', 'conventional', 'GPCRdb']
-
-    return parsed
-
-
-def fetch_gpcr_db_lookup_table(protein_name, parse_dgn=True):
-    """
-    Retrieve GPCRdb residue numbering lookup table.
-    """
-    # GET request
-    url = 'http://gpcrdb.org/services/residues/{0}/'.format(protein_name)
-    response = requests.get(url)
-
-    # Format response into dataframe
-    protein_mapping = pd.DataFrame(response.json())
-    protein_mapping.insert(0, 'SOURCE_ID', protein_name)
-
-    # Parse diplay_generic_number
-    if parse_dgn:
-        reformed = _parse_display_generic_number(protein_mapping['display_generic_number'])
-        protein_mapping = pd.concat(axis=1, objs=[protein_mapping, reformed])
-
-    return protein_mapping
+def calculate_occupancy(new_alignment):
+    #Calculating occupancy in alignment
+    gaps = []
+    occupancy = []
+    alignment_count = len(new_alignment)
+    alignment_length = new_alignment.get_alignment_length()
+    for a in range(alignment_length):
+            column_count = new_alignment[:, a]
+            gap_count = column_count.count('-')
+            gaps.append(gap_count)
+            occupancy.append(alignment_count - gap_count)
+    occupancy_table = pd.DataFrame(occupancy)
+    occupancy_table.index.name = 'column'
+    occupancy_table.columns = ['Occupancy']
+    occupancy_table.reset_index(inplace=True)
+    return occupancy_table
 
 
-def filter_empty_sequences(alignment):
-    #Check for empty sequences
-    passed = []
-    for seq in alignment:
-        sequence_string = str(seq.seq)
-        if not all([x == '-' for x in sequence_string]):
-            passed.append(seq)
+def choosing_umd_residues(full_table):
+    #creating dataframe using only the values we need (missense and synonymous variant, shenkin score occupancy, new_label)
+    scores = full_table[full_table.columns[0:2]]
+    score = full_table[full_table.columns[5:6]]
+    info = full_table[full_table.columns[20:22]]
+    required_data = scores.join([score,info], how='outer')
 
-    new_alignment = MultipleSeqAlignment(passed)
-    return new_alignment
+    #Ranking data from high to low based on shenkin score
+    sorted_data = required_data.sort_values(['shenkin', 'missense_variant'],
+                                            axis=0, ascending=False, inplace=False,
+                                            kind='quicksort', na_position='last')
+    #Choosing only the top 95% of shenkin scores
+    shenkin_data = sorted_data[sorted_data.shenkin > sorted_data.shenkin.quantile(.95)]
+    #Filtering out high missense variant counts
+    umd_residues = shenkin_data[shenkin_data.missense_variant < shenkin_data.missense_variant.quantile(.90)]['new_label'].unique()
+    return umd_residues
 
 
 def pipeline(path):
@@ -80,6 +71,8 @@ def pipeline(path):
     # Fixed FASTA file
     GPCR_alignment_fixed = GPCR_alignment_fasta.replace('.', '_fixed.')
 
+    print
+    'Reading {} file'.format(path)
 
     # Reading CSV table with Pandas
     csv_table = pd.read_csv(GPCR_alignment_csv, header=1, index_col=0)
@@ -143,42 +136,16 @@ def pipeline(path):
     # AACons and column stat joint table
     conservation_plane = conseq_groups[['missense_variant', 'synonymous_variant']].join(aacons_table, how='outer')
 
+    # Calculating occupancy and making full table
+    occupancy_table = calculate_occupancy(new_alignment)
+    scores = conservation_plane.join(occupancy_table).drop(['column'], axis=1)
+    full_table = scores.join(alignment_columns).drop(['column'], axis=1)
 
     # Plotting results
+    color_plot = coloring_plot(full_table)
     saved_graph = draw_graph(full_table, color_plot)
     datatable = create_table_for_analysis(color_plot)
 
     return full_table, saved_graph, datatable
 
 
-def draw_graph(full_table, color_plot, fix_axes=False):
-    '''
-    Creates a data table that the graph will be created from. At the end, the graph
-    is being saved to the same folder the dataframe came from.
-    '''
-
-    # Creating the data table for the plot
-    data_plot = pd.melt(color_plot,
-                        id_vars=color_plot.columns[2:].tolist(),
-                        var_name='Variant_Effect', value_name='Count')
-
-    # Plotting the above data
-    lm = sns.lmplot(x='shenkin', y='Count', col='Variant_Effect', hue="Variant_Effect",
-                    palette='bright', data=data_plot,
-                    fit_reg=False, sharex=True, sharey=True)
-    axes = lm.axes
-    if fix_axes:
-        axes[0, 0].set_xlim(0, fix_axes[0])
-        axes[0, 1].set_xlim(0, fix_axes[0])
-        axes[0, 0].set_ylim(0, fix_axes[1])
-        axes[0, 1].set_ylim(0, fix_axes[1])
-
-    # saves the graph to the respective folder
-    plt.suptitle(path + ' graph', x=0.27)  # giving the graph title
-    plt.subplots_adjust(top=0.88)  # ensures that the title is saved with the graph
-    saved_graph = plt.savefig('./data/' + path + '/_graph.png')
-    return saved_graph
-
-
-
-if __name__ == '__main__':
