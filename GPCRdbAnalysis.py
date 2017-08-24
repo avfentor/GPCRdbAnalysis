@@ -16,6 +16,51 @@ import matplotlib.pyplot as plt
 requests_cache.install_cache('gpcrdb_cache')
 
 
+def _parse_display_generic_number(x):
+    """
+    Parse "display_generic_number".
+
+    GPCRdb numbering looks like "1.26x26". This function splits each component out of a list
+    of such numbers and returns a DataFrame.
+    """
+    parsed = pd.Series(x).str.split('[.x]', expand=True)
+    parsed.columns = ['seqment', 'conventional', 'GPCRdb']
+
+    return parsed
+
+
+def fetch_gpcr_db_lookup_table(protein_name, parse_dgn=True):
+    """
+    Retrieve GPCRdb residue numbering lookup table.
+    """
+    # GET request
+    url = 'http://gpcrdb.org/services/residues/{0}/'.format(protein_name)
+    response = requests.get(url)
+
+    # Format response into dataframe
+    protein_mapping = pd.DataFrame(response.json())
+    protein_mapping.insert(0, 'SOURCE_ID', protein_name)
+
+    # Parse diplay_generic_number
+    if parse_dgn:
+        reformed = _parse_display_generic_number(protein_mapping['display_generic_number'])
+        protein_mapping = pd.concat(axis=1, objs=[protein_mapping, reformed])
+
+    return protein_mapping
+
+
+def filter_empty_sequences(alignment):
+    #Check for empty sequences
+    passed = []
+    for seq in alignment:
+        sequence_string = str(seq.seq)
+        if not all([x == '-' for x in sequence_string]):
+            passed.append(seq)
+
+    new_alignment = MultipleSeqAlignment(passed)
+    return new_alignment
+
+
 def calculate_occupancy(new_alignment):
     #Calculating occupancy in alignment
     gaps = []
@@ -140,9 +185,9 @@ def pipeline(path):
     full_table = scores.join(alignment_columns).drop(['column'], axis=1)
 
     # Plotting results
-    color_plot = coloring_plot(full_table)
-    saved_graph = draw_graph(full_table, color_plot)
-    datatable = create_table_for_analysis(color_plot)
+    color_plot_no = coloring_plot(full_table)
+    saved_graph = draw_graph(full_table, color_plot_no)
+    datatable = create_table_for_analysis(color_plot_no)
 
     return full_table, saved_graph, datatable
 
@@ -162,18 +207,22 @@ def coloring_plot(full_table):
     color_plot.rename(columns={'new_label_x': 'new_label', 'new_label_y': 'T_or_F'}, inplace=True)
     color_plot['id_if_selected'] = ''
     color_plot.loc[color_plot['T_or_F'], 'id_if_selected'] = color_plot[color_plot['T_or_F']]['new_label']
-    return color_plot
+
+    occremove = color_plot[color_plot.Occupancy < color_plot.Occupancy.quantile(.20)]['Occupancy'].unique()
+    color_plot_no = color_plot[~color_plot['Occupancy'].isin(occremove)]
+
+    return color_plot_no
 
 
-def draw_graph(full_table, color_plot, fix_axes=False):
+def draw_graph(full_table, color_plot_no, fix_axes=False):
     '''
     Creates a data table that the graph will be created from. At the end, the graph
     is being saved to the same folder the dataframe came from.
     '''
 
     # Creating the data table for the plot
-    data_plot = pd.melt(color_plot,
-                        id_vars=color_plot.columns[2:].tolist(),
+    data_plot = pd.melt(color_plot_no,
+                        id_vars=color_plot_no.columns[2:].tolist(),
                         var_name='Variant_Effect', value_name='Count')
 
     # Plotting the above data
@@ -202,18 +251,18 @@ def draw_graph(full_table, color_plot, fix_axes=False):
     return saved_graph
 
 
-def create_table_for_analysis(color_plot):
+def create_table_for_analysis(color_plot_no):
     '''
     Creates data table that will be used for analysis. Contains column number that will be used
     in Jalview. IMPORTANT!!! 1 needs to be added to each column number when picking residues
     in Jalview because Python starts counting from 0 and Jalview starts from 1.
     data table is being saved to the folder the data came from.
     '''
-    true_values = color_plot[color_plot['T_or_F']]['new_label']
-    color_plot.loc[color_plot['T_or_F'], 'id_if_selected'] = true_values #selected new_label columns based on T/F conditions
+    true_values = color_plot_no[color_plot_no['T_or_F']]['new_label']
+    color_plot_no.loc[color_plot_no['T_or_F'], 'id_if_selected'] = true_values #selected new_label columns based on T/F conditions
     true_table = pd.DataFrame(true_values)
     true_table.reset_index(inplace=True) #creating new index, so columns are part of the saved table
-    selected_columns = true_table.merge(color_plot.loc[:,['new_label',
+    selected_columns = true_table.merge(color_plot_no.loc[:,['new_label',
                                                           'missense_variant', 'shenkin', 'Occupancy']],
                                         how='left',on='new_label') #merging desired columns
     newcol = ''
