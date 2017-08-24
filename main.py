@@ -61,6 +61,24 @@ def filter_empty_sequences(alignment):
     return new_alignment
 
 
+def calculate_occupancy(new_alignment):
+    #Calculating occupancy in alignment
+    gaps = []
+    occupancy = []
+    alignment_count = len(new_alignment)
+    alignment_length = new_alignment.get_alignment_length()
+    for a in range(alignment_length):
+            column_count = new_alignment[:, a]
+            gap_count = column_count.count('-')
+            gaps.append(gap_count)
+            occupancy.append(alignment_count - gap_count)
+    occupancy_table = pd.DataFrame(occupancy)
+    occupancy_table.index.name = 'column'
+    occupancy_table.columns = ['Occupancy']
+    occupancy_table.reset_index(inplace=True)
+    return occupancy_table
+
+
 def pipeline(path):
     """
     The below code imports the fasta file and csv file from the folders given above,
@@ -104,7 +122,7 @@ def pipeline(path):
         AlignIO.write(new_alignment, out, 'fasta')
 
 
-        # Merge sequences onto alignment columns
+    # Merge sequences onto alignment columns
     alignment_mapped_proteins = []
     for seq in new_alignment:
         protein_mapping_table = fetch_gpcr_db_lookup_table(seq.name)
@@ -143,22 +161,26 @@ def pipeline(path):
     # AACons and column stat joint table
     conservation_plane = conseq_groups[['missense_variant', 'synonymous_variant']].join(aacons_table, how='outer')
 
+    # Calculating occupancy and making full table
+    occupancy_table = calculate_occupancy(new_alignment)
+    scores = conservation_plane.join(occupancy_table).drop(['column'], axis=1)
+    full_table = scores.join(alignment_columns).drop(['column'], axis=1)
 
     # Plotting results
-    saved_graph = draw_graph(full_table, color_plot)
+    saved_graph = draw_graph(full_table)
 
     return full_table, saved_graph
 
 
-def draw_graph(full_table, color_plot, fix_axes=False):
+def draw_graph(full_table, fix_axes=False):
     '''
     Creates a data table that the graph will be created from. At the end, the graph
     is being saved to the same folder the dataframe came from.
     '''
 
     # Creating the data table for the plot
-    data_plot = pd.melt(color_plot,
-                        id_vars=color_plot.columns[2:].tolist(),
+    data_plot = pd.melt(full_table,
+                        id_vars=full_table.columns[2:].tolist(),
                         var_name='Variant_Effect', value_name='Count')
 
     # Plotting the above data
@@ -175,7 +197,7 @@ def draw_graph(full_table, color_plot, fix_axes=False):
     # saves the graph to the respective folder
     plt.suptitle(path + ' graph', x=0.27)  # giving the graph title
     plt.subplots_adjust(top=0.88)  # ensures that the title is saved with the graph
-    saved_graph = plt.savefig('./data/' + path + '/_graph.png')
+    saved_graph = plt.savefig('./data/' + path + '/graph.png')
     return saved_graph
 
 
