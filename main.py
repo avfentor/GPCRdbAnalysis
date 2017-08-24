@@ -146,9 +146,8 @@ def pipeline(path):
 
     # Plotting results
     saved_graph = draw_graph(full_table, color_plot)
-    datatable = create_table_for_analysis(color_plot)
 
-    return full_table, saved_graph, datatable
+    return full_table, saved_graph
 
 
 def draw_graph(full_table, color_plot, fix_axes=False):
@@ -165,7 +164,7 @@ def draw_graph(full_table, color_plot, fix_axes=False):
     # Plotting the above data
     lm = sns.lmplot(x='shenkin', y='Count', col='Variant_Effect', hue="Variant_Effect",
                     palette='bright', data=data_plot,
-                    fit_reg=False, sharex=True, sharey=True)
+                    fit_reg=True, sharex=True, sharey=True)
     axes = lm.axes
     if fix_axes:
         axes[0, 0].set_xlim(0, fix_axes[0])

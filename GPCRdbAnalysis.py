@@ -71,8 +71,6 @@ def pipeline(path):
     # Fixed FASTA file
     GPCR_alignment_fixed = GPCR_alignment_fasta.replace('.', '_fixed.')
 
-    print
-    'Reading {} file'.format(path)
 
     # Reading CSV table with Pandas
     csv_table = pd.read_csv(GPCR_alignment_csv, header=1, index_col=0)
@@ -97,7 +95,7 @@ def pipeline(path):
         AlignIO.write(new_alignment, out, 'fasta')
 
 
-        # Merge sequences onto alignment columns
+    # Merge sequences onto alignment columns
     alignment_mapped_proteins = []
     for seq in new_alignment:
         protein_mapping_table = fetch_gpcr_db_lookup_table(seq.name)
@@ -149,3 +147,80 @@ def pipeline(path):
     return full_table, saved_graph, datatable
 
 
+def coloring_plot(full_table):
+    '''
+    Coloring_plot takes the baove created full_table which is unique to each protein family. Based on the
+    parameters given in the search, those individual residues will be colored on the graph that is created below.
+    A true/false column is being added to the already existing dataframe. We can either give it
+    individual residues or parameters.
+    '''
+
+    search = choosing_umd_residues(full_table)
+    in_search = full_table['new_label'].isin(search)
+    TF_table = pd.DataFrame(in_search)
+    color_plot = full_table.join(TF_table, lsuffix='_x', rsuffix='_y', )
+    color_plot.rename(columns={'new_label_x': 'new_label', 'new_label_y': 'T_or_F'}, inplace=True)
+    color_plot['id_if_selected'] = ''
+    color_plot.loc[color_plot['T_or_F'], 'id_if_selected'] = color_plot[color_plot['T_or_F']]['new_label']
+    return color_plot
+
+
+def draw_graph(full_table, color_plot, fix_axes=False):
+    '''
+    Creates a data table that the graph will be created from. At the end, the graph
+    is being saved to the same folder the dataframe came from.
+    '''
+
+    # Creating the data table for the plot
+    data_plot = pd.melt(color_plot,
+                        id_vars=color_plot.columns[2:].tolist(),
+                        var_name='Variant_Effect', value_name='Count')
+
+    # Plotting the above data
+    lm = sns.lmplot(x='shenkin', y='Count', col='Variant_Effect', hue="id_if_selected",
+                    palette='bright', data=data_plot,
+                    fit_reg=False, sharex=True, sharey=True)
+    axes = lm.axes
+    if fix_axes:
+        axes[0, 0].set_xlim(0, fix_axes[0])
+        axes[0, 1].set_xlim(0, fix_axes[0])
+        axes[0, 0].set_ylim(0, fix_axes[1])
+        axes[0, 1].set_ylim(0, fix_axes[1])
+
+    # Adds labels to the colored residues
+    data_plot.loc[:, 'Count'] = data_plot.loc[:, 'Count'].fillna(0)
+    for p in zip(data_plot['shenkin'], data_plot['Count'], data_plot['id_if_selected'], data_plot['Variant_Effect']):
+        ax = axes[0, 1]
+        if p[3] == 'missense_variant':
+            ax = axes[0, 0]
+        ax.text(p[0], p[1], p[2])
+
+    # saves the graph to the respective folder
+    plt.suptitle(path + ' graph', x=0.27)  # giving the graph title
+    plt.subplots_adjust(top=0.88)  # ensures that the title is saved with the graph
+    saved_graph = plt.savefig('./data/' + path + '/colored_graph.png')
+    return saved_graph
+
+
+def create_table_for_analysis(color_plot):
+    '''
+    Creates data table that will be used for analysis. Contains column number that will be used
+    in Jalview. IMPORTANT!!! 1 needs to be added to each column number when picking residues
+    in Jalview because Python starts counting from 0 and Jalview starts from 1.
+    data table is being saved to the folder the data came from.
+    '''
+    true_values = color_plot[color_plot['T_or_F']]['new_label']
+    color_plot.loc[color_plot['T_or_F'], 'id_if_selected'] = true_values #selected new_label columns based on T/F conditions
+    true_table = pd.DataFrame(true_values)
+    true_table.reset_index(inplace=True) #creating new index, so columns are part of the saved table
+    selected_columns = true_table.merge(color_plot.loc[:,['new_label',
+                                                          'missense_variant', 'shenkin', 'Occupancy']],
+                                        how='left',on='new_label') #merging desired columns
+    newcol = ''
+    datatable = selected_columns.assign(Effect=newcol)
+    datatable.to_csv('./data/' + path + '/' + path + 'colres_datatable.csv', sep=',', mode='w')
+    return datatable
+
+
+
+if __name__ == '__main__':
