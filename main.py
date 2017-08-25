@@ -1,3 +1,8 @@
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+
+
 import argparse
 from Bio import AlignIO
 from Bio.Align import MultipleSeqAlignment #reading in the alignment
@@ -9,9 +14,6 @@ import requests #getting GPCR lookup table from GPCRdb website
 import requests_cache
 import subprocess
 import seaborn as sns
-import matplotlib.pyplot as plt
-
-%matplotlib inline
 
 requests_cache.install_cache('gpcrdb_cache')
 
@@ -96,7 +98,7 @@ def pipeline(path):
     GPCR_alignment_aacon = GPCR_alignment_aacon.replace('fa', 'aacons')
 
     # Fixed FASTA file
-    GPCR_alignment_fixed = GPCR_alignment_fasta.replace('.', '_fixed.')
+    GPCR_alignment_fixed = GPCR_alignment_fasta + '.fixed.fa'
 
 
     # Reading CSV table with Pandas
@@ -172,7 +174,7 @@ def pipeline(path):
     return full_table, saved_graph
 
 
-def draw_graph(full_table, fix_axes=False):
+def draw_graph(full_table, title='figure1', fix_axes=False):
     '''
     Creates a data table that the graph will be created from. At the end, the graph
     is being saved to the same folder the dataframe came from.
@@ -195,11 +197,22 @@ def draw_graph(full_table, fix_axes=False):
         axes[0, 1].set_ylim(0, fix_axes[1])
 
     # saves the graph to the respective folder
-    plt.suptitle(path + ' graph', x=0.27)  # giving the graph title
+    plt.suptitle(title, x=0.27)  # giving the graph title
     plt.subplots_adjust(top=0.88)  # ensures that the title is saved with the graph
-    saved_graph = plt.savefig('./data/' + path + '/graph.png')
+    saved_graph = plt.savefig(title + '.png')
     return saved_graph
 
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Align variants to GPCRdb alignments, using compbio-conservation-1.1.jar.')
+    parser.add_argument('alignment', type=str, help='Path to the alignment.')
+    parser.add_argument('csv', type=str, help='Path to the GPCRdb CSV.')
+    args = parser.parse_args()
+
+    print 'Processing {} and {} files...'.format(args.alignment, args.csv)
+
+    pipeline('.')
+
+    print 'Done.'
+

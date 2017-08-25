@@ -11,54 +11,9 @@ import subprocess
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-%matplotlib inline
+from main import _parse_display_generic_number, fetch_gpcr_db_lookup_table, filter_empty_sequences
 
 requests_cache.install_cache('gpcrdb_cache')
-
-
-def _parse_display_generic_number(x):
-    """
-    Parse "display_generic_number".
-
-    GPCRdb numbering looks like "1.26x26". This function splits each component out of a list
-    of such numbers and returns a DataFrame.
-    """
-    parsed = pd.Series(x).str.split('[.x]', expand=True)
-    parsed.columns = ['seqment', 'conventional', 'GPCRdb']
-
-    return parsed
-
-
-def fetch_gpcr_db_lookup_table(protein_name, parse_dgn=True):
-    """
-    Retrieve GPCRdb residue numbering lookup table.
-    """
-    # GET request
-    url = 'http://gpcrdb.org/services/residues/{0}/'.format(protein_name)
-    response = requests.get(url)
-
-    # Format response into dataframe
-    protein_mapping = pd.DataFrame(response.json())
-    protein_mapping.insert(0, 'SOURCE_ID', protein_name)
-
-    # Parse diplay_generic_number
-    if parse_dgn:
-        reformed = _parse_display_generic_number(protein_mapping['display_generic_number'])
-        protein_mapping = pd.concat(axis=1, objs=[protein_mapping, reformed])
-
-    return protein_mapping
-
-
-def filter_empty_sequences(alignment):
-    #Check for empty sequences
-    passed = []
-    for seq in alignment:
-        sequence_string = str(seq.seq)
-        if not all([x == '-' for x in sequence_string]):
-            passed.append(seq)
-
-    new_alignment = MultipleSeqAlignment(passed)
-    return new_alignment
 
 
 def calculate_occupancy(new_alignment):
@@ -214,7 +169,7 @@ def coloring_plot(full_table):
     return color_plot_no
 
 
-def draw_graph(full_table, color_plot_no, fix_axes=False):
+def draw_graph(full_table, color_plot_no, title='figure2', fix_axes=False):
     '''
     Creates a data table that the graph will be created from. At the end, the graph
     is being saved to the same folder the dataframe came from.
@@ -245,13 +200,13 @@ def draw_graph(full_table, color_plot_no, fix_axes=False):
         ax.text(p[0], p[1], p[2])
 
     # saves the graph to the respective folder
-    plt.suptitle(path + ' graph', x=0.27)  # giving the graph title
+    plt.suptitle(title, x=0.27)  # giving the graph title
     plt.subplots_adjust(top=0.88)  # ensures that the title is saved with the graph
-    saved_graph = plt.savefig('./data/' + path + '/colored_graph.png')
+    saved_graph = plt.savefig(title + '_colored_graph.png')
     return saved_graph
 
 
-def create_table_for_analysis(color_plot_no):
+def create_table_for_analysis(color_plot_no, title='table'):
     '''
     Creates data table that will be used for analysis. Contains column number that will be used
     in Jalview. IMPORTANT!!! 1 needs to be added to each column number when picking residues
@@ -267,9 +222,19 @@ def create_table_for_analysis(color_plot_no):
                                         how='left',on='new_label') #merging desired columns
     newcol = ''
     datatable = selected_columns.assign(Effect=newcol)
-    datatable.to_csv('./data/' + path + '/' + path + 'colres_datatable.csv', sep=',', mode='w')
+    datatable.to_csv(title + '_colres_datatable.csv', sep=',', mode='w')
     return datatable
 
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Align variants to a GPCR alignment, using compbio-conservation-1.1.jar.')
+    parser.add_argument('alignment', type=str, help='Path to the alignment.')
+    parser.add_argument('csv', type=str, help='Path to the GPCRdb CSV.')
+    args = parser.parse_args()
+
+    print 'Processing {} and {} files...'.format(args.alignment, args.csv)
+
+    pipeline('.')
+
+    print 'Done.'
